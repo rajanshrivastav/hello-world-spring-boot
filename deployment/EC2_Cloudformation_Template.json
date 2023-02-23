@@ -1,1 +1,119 @@
-
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description": "Template to launch ec2",
+	"Parameters": {
+		"KeyName": {
+			"Description": "Name of an existing keypair",
+			"Type": "String",
+			"ConstraintDescription": "must be the name of an existing EC2 KeyPair.",
+			"Default": "rajanshrivastav"
+		},
+		"InstanceType": {
+			"Description": "Type of instance that need to be lauched",
+			"Type": "String",
+			"Default": "t2.micro",
+			"AllowedValues":["t2.micro","m4.xlarge","c5.xlarge","m4.2xlarge","t2.nano","c5.2xlarge"],
+			"ConstraintDescription": "must be a valid EC2 instance type."
+		},
+		"LatestAmiId": {
+			"Type": "String",
+			"Description":"specify from which AMI, you want to launch the instance",
+			"Default": "ami-0e742cca61fb65051"
+		},
+		"VPCID": {
+			"Type": "AWS::EC2::VPC::Id",
+			"Description":"specify in which VPC, you want to launch the instance",
+			"Default": "vpc-0b2cfa1a86b9a72b5"
+		},
+		"SubnetID": {
+			"Type": "AWS::EC2::Subnet::Id",
+			"Description":"specify in which subnet, you want to launch this instance",
+			"Default": "subnet-5b"
+		},
+		"SecurityGroup": {
+			"Type": "String",
+			"Description":"specify security group id for this instance",
+			"Default": "sg-027f4d5b23644c89e"
+		},
+		"EIPCondition":{
+			"Description": "specify whether you want to attach fresh elastic IP for this instance, specifying this option as yes will launch new elastic IP for this instance, if you're specifying 'yes' then specify false in 'EIPExists' paramter",
+			"Type":"String",
+			"AllowedValues": ["true","false"],
+			"ConstraintDescription": "must specify whether fresh elastic ip is required or not"
+		},				
+		"EBSVolumeRequired": {
+			"Description": "specify if additional ebs volume is required or not, this will create new EBS volume",
+			"Type":"String",
+			"Default": "false",
+			"AllowedValues": ["true","false"]
+		},
+		"EBSVolumeSize": {
+			"Description": "if ebs is required, then specify VolumeSize in GiB, if not required, specify false in above option",
+			"Type": "Number",
+			"Default":"10"
+		}
+	},
+	"Conditions": {
+		"EBSVolumeCondition":{"Fn::Equals":[{"Ref":"EBSVolumeRequired"},"true"]}
+	},
+	"Mappings" : {
+		"AWSRegionArch2AMI" : {
+			"us-east-1": { "HVM64" : "ami-08842d60" },
+			"ap-south-1" : {"HVM64" : "ami-0e742cca61fb65051"}
+		}
+	},
+	"Resources": {
+		"EC2Instance": {
+			"Type": "AWS::EC2::Instance",
+			"Properties": {
+				"Tags": [{"Key": "Name","Value": "rajanshrivastav"}],
+				"InstanceType" : {"Ref": "InstanceType"},
+				"SubnetId": {"Ref": "SubnetID"},
+				"KeyName": {"Ref": "KeyName"},
+				"ImageId": { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, "HVM64" ] },
+				"SourceDestCheck" : "false",
+				"SecurityGroupIds" : [{"Ref": "SecurityGroup"}],
+				"UserData": {"Fn::Base64" : {"Fn::Join" : ["\n", [
+				"#!/bin/bash",
+				"exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1",
+				"yum update -y",
+				"yum install ntp -y",
+				"yum install wget -y",
+				"service sshd restart",
+				"curl -O https://download.java.net/java/GA/jdk11/13/GPL/openjdk-11.0.1_linux-x64_bin.tar.gz",
+				"tar zxvf openjdk-11.0.1_linux-x64_bin.tar.gz",
+				"mv jdk-11.0.1 /usr/local/",
+				"echo 'export JAVA_HOME=/usr/local/jdk-11.0.1' >> /etc/profile.d/jdk11.sh",
+				"echo 'export PATH=$PATH:$JAVA_HOME/bin' >> /etc/profile.d/jdk11.sh",
+				"source /etc/profile.d/jdk11.sh",
+				"yum update -y",
+				"sed -i -e 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config",
+				"echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config",
+				"service sshd restart",
+				"useradd rajanshrivastav -s /bin/bash",
+				"echo rajanshrivastav | passwd rajanshrivastav --stdin",
+				"passwd -e rajanshrivastav",
+				"yum install telnet -y"
+				]]
+				}}
+			}
+		},
+		"MountPoint": {
+			"Type" : "AWS::EC2::VolumeAttachment",
+			"Condition": "EBSVolumeCondition",
+			"Properties": {
+				"InstanceId": {"Ref": "EC2Instance"},
+				"VolumeId": {"Ref": "EBSVolume"},
+				"Device": "/dev/xvdba"
+			}
+		},
+		"EBSVolume": {
+			"Type" : "AWS::EC2::Volume",
+			"Condition": "EBSVolumeCondition",
+			"Properties": {
+				"Size": {"Ref": "EBSVolumeSize"},
+				"AvailabilityZone": {"Fn::GetAtt": ["EC2Instance", "AvailabilityZone"]}
+			}
+		}
+	}
+}
